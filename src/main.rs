@@ -17,10 +17,6 @@ use piston::event_loop::*;
 use piston::input::*;
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{ GlGraphics, OpenGL };
-use graphics::context::Context;
-
-type SystemContext<'a> = (&'a GlGraphics, Context);
-
 
 
 #[derive(Clone, Debug)]
@@ -65,8 +61,8 @@ impl specs::Component for Ren {
 struct AttractSys;
 struct ReactSys;
 struct MoveSys;
-impl<'a> specs::System<SystemContext<'a>> for AttractSys {
-    fn run(&mut self, arg: specs::RunArg, _: SystemContext) {
+impl specs::System<()> for AttractSys {
+    fn run(&mut self, arg: specs::RunArg, _: ()) {
         let (mut force, attraction, pos) = arg.fetch(|w| (w.write::<Force>(), w.read::<Attraction>(), w.read::<Pos>()) );
         for (force, attraction, pos) in (&mut force.pass(), &attraction.pass(), &pos.pass()).join() {
             force.0 += (pos.0 - attraction.0) * 0.1;
@@ -74,8 +70,8 @@ impl<'a> specs::System<SystemContext<'a>> for AttractSys {
     }
 }
 
-impl<'a> specs::System<SystemContext<'a>> for ReactSys {
-    fn run(&mut self, arg: specs::RunArg, _: SystemContext) {
+impl specs::System<()> for ReactSys {
+    fn run(&mut self, arg: specs::RunArg, _: ()) {
         let (mut vel, force) = arg.fetch(|w| (w.write::<Vel>(), w.read::<Force>()) );
         for (vel, force) in (&mut vel.pass(), &force.pass()).join() {
             vel.0 += force.0;
@@ -83,8 +79,8 @@ impl<'a> specs::System<SystemContext<'a>> for ReactSys {
     }
 }
 
-impl<'a> specs::System<SystemContext<'a>> for MoveSys {
-    fn run(&mut self, arg: specs::RunArg, _: SystemContext) {
+impl specs::System<()> for MoveSys {
+    fn run(&mut self, arg: specs::RunArg, _: ()) {
         let (mut pos, vel) = arg.fetch(|w| (w.write::<Pos>(), w.read::<Vel>()) );
         for (pos, vel) in (&mut pos.pass(), &vel.pass()).join() {
             pos.0 += vel.0;
@@ -92,46 +88,14 @@ impl<'a> specs::System<SystemContext<'a>> for MoveSys {
     }
 }
 
-struct RenderSys;
-impl<'a> specs::System<SystemContext<'a>> for RenderSys {
-    fn run(&mut self, args: specs::RunArg, context: SystemContext) {
-        let gl;
-        let c;
-        let (pos, gl, c, ) = args.fetch(|w| {
-            gl = w.read_resource::<&mut GlGraphics>();
-            c = w.read_resource::<Context>();
-            (w.read::<Pos>(), gl, c)
-        });
 
-        // TODO NOW I'm here and wondering how to get resources from world
-
-        use graphics::*;
-        // Clear the screen.
-        clear([0.5, 0.5, 0.5, 1.0], *gl);
-        let square = rectangle::square(0.0, 0.0, 50.0);
-        // let (x, y) = ((args.width / 2) as f64,
-                      // (args.height / 2) as f64);
-        let (x, y) = (50f64, 50f64);
-
-        /*
-        for pos in &pos.pass() {
-            let transform = c.transform.trans(pos.0.x, pos.0.y);
-
-            // Draw a box rotating around the middle of the screen.
-            rectangle([1.0, 1.0, 1.0, 1.0], square, transform, gl);
-        }
-        */
-    }
-}
-
-
-pub struct App<'a> {
+pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
-    planner: specs::Planner<SystemContext<'a>>,
+    planner: specs::Planner<()>,
 }
 
-impl<'a> App<'a> {
-    fn new(opengl: OpenGL) -> App<'a> {
+impl App {
+    fn new(opengl: OpenGL) -> App {
         let mut rng = rand::thread_rng();
 
         let mut planner = {
@@ -153,13 +117,12 @@ impl<'a> App<'a> {
             }
             // Planner is used to run systems on the specified world with as many
             // threads as virtual cpus
-            specs::Planner::<SystemContext>::new(w)
+            specs::Planner::<()>::new(w)
         };
 
         planner.add_system(MoveSys, "move system", 0);
         planner.add_system(ReactSys, "react system", 0);
         planner.add_system(AttractSys, "attract system", 0);
-        planner.add_system(RenderSys, "render system", 1);
 
         App {
             gl: GlGraphics::new(opengl),
@@ -170,17 +133,30 @@ impl<'a> App<'a> {
         use graphics::*;
 
 
+        let w = self.planner.mut_world();
+        let pos = w.read::<Pos>();
+        let ren = w.read::<Ren>();
+
+        let square = rectangle::square(0.0, 0.0, 50.0);
+        let (x, y) = ((args.width / 2) as f64,
+                      (args.height / 2) as f64);
+
 
         self.gl.draw(args.viewport(), |c, gl| {
-            // TODO render.
+            // Clear the screen.
+            clear([0.5, 0.5, 0.5, 1.0], gl);
+            for (pos, ren) in (&pos.pass(), &ren.pass()).join() {
+                let transform = c.transform.trans(pos.0.x as f64, pos.0.y as f64);
+
+                // Draw a box rotating around the middle of the screen.
+                rectangle([1.0, 1.0, 1.0, 1.0], square, transform, gl);
+            }
         });
     }
 
     fn update(&mut self, args: &UpdateArgs) {
 
-        // TODO  can't update or anything without knowing graphics context..
-        // self.planner.dispatch(());
-
+        self.planner.dispatch(());
         // Example of run_custom:
         /*
         self.planner.run_custom(|arg| {
